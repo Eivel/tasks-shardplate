@@ -188,6 +188,7 @@ func (sq *ShardedQueue) Produce(ctx context.Context, shardNumber int, wg *sync.W
 	go func(ctx context.Context, sq *ShardedQueue, shardNumber int, wg *sync.WaitGroup) {
 		for {
 			select {
+			// It's a bottleneck for the PoC, I'm aware of that.
 			case <-time.After(1 * time.Millisecond):
 				queueElement, err := sq.Pop(shardNumber)
 				if err == ErrQueueEmpty {
