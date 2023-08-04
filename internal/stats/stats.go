@@ -1,11 +1,16 @@
 package stats
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sync"
 
 	"github.com/google/uuid"
+)
+
+var (
+	ErrPartialWrite = errors.New("some of the data was not saved to disk")
 )
 
 type Incrementer interface {
@@ -40,13 +45,12 @@ func (s *Summary) Write(entityID uuid.UUID, dest io.Writer) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	fmt.Printf("ID: %s\n", entityID)
-	// for k, _ := range s.Data {
-	// 	fmt.Println(k)
-	// }
 	if count, ok := s.data[entityID]; ok {
 		output := fmt.Sprintf("ID: %s, RequestsProcessed: %d", entityID, count)
-		_, err := dest.Write([]byte(output))
+		n, err := dest.Write([]byte(output))
+		if n != len(output) {
+			return ErrPartialWrite
+		}
 		return err
 	}
 	return nil

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -58,7 +57,6 @@ func main() {
 		wpCtxs[i].ctx = context.WithValue(wpCtxs[i].ctx, "summary", summary)
 
 		workerFunc := func(ctx context.Context, data payload.Identifiable, workerID uuid.UUID) {
-			fmt.Printf("Worker %s processing data: timestamp %s, value %+v\n", workerID, data.Payload().(payload.Payload).Timestamp, data.Payload().(payload.Payload).Value)
 			bytes, err := json.Marshal(data.Payload().(payload.Payload))
 			if err != nil {
 				log.Printf("worker %s raised json marshalling error: %s", workerID, err)
@@ -70,7 +68,6 @@ func main() {
 			}
 
 			ctx.Value("summary").(stats.Incrementer).Increment(workerID)
-			fmt.Printf("Worker %s finished processing data: timestamp %s, value %+v\n", workerID, data.Payload().(payload.Payload).Timestamp, data.Payload().(payload.Payload).Value)
 		}
 
 		finalizeWorkerFunc := func(ctx context.Context, workerID uuid.UUID) {
@@ -90,15 +87,18 @@ func main() {
 		wpConfig := workerpool.Config{
 			StartingWorkersNumber: 3,
 			MaxWorkersNumber:      4,
-			WorkerTTL:             12 * time.Second,
+			WorkerTTL:             2 * time.Minute,
 			AutoscalingInterval:   1 * time.Second,
 			WorkerFunc:            workerFunc,
 			FinalizeWorkerFunc:    finalizeWorkerFunc,
 		}
 
-		wp := workerpool.WorkerPool{}
 		dataChan, confirmationChan := q.Consume(i)
-		wp.Init(wpConfig, dataChan, confirmationChan)
+		wp, err := workerpool.NewWorkerPool(wpConfig, dataChan, confirmationChan)
+		if err != nil {
+			log.Println(err)
+			return
+		}
 		go wp.Start(wpCtxs[i].ctx)
 	}
 
@@ -110,7 +110,7 @@ func main() {
 	e.GET("/collect", func(c echo.Context) error {
 		data := []payload.Payload{}
 		if err := c.Bind(&data); err != nil {
-			fmt.Println(err)
+			log.Println(err)
 			return echo.NewHTTPError(http.StatusBadRequest, "incorrect data format")
 		}
 
@@ -119,7 +119,7 @@ func main() {
 			data[index].Identifier = &id
 
 			if err := q.Push(&data[index]); err != nil {
-				fmt.Println(err)
+				log.Println(err)
 				return echo.NewHTTPError(http.StatusInternalServerError, "error handling the request")
 			}
 		}
@@ -149,5 +149,5 @@ func main() {
 	for runtime.NumGoroutine() > 2 {
 		time.Sleep(1 * time.Second)
 	}
-	fmt.Println("Exiting...")
+	log.Println("exiting...")
 }

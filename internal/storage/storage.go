@@ -2,15 +2,13 @@ package storage
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"sync"
 )
 
 type LocalStorage struct {
-	Mutex        sync.Mutex
+	mutex        sync.Mutex
 	relativePath string
-	io.Writer
 }
 
 func NewLocalStorage(filepath string) *LocalStorage {
@@ -18,8 +16,8 @@ func NewLocalStorage(filepath string) *LocalStorage {
 }
 
 func (l *LocalStorage) Write(p []byte) (int, error) {
-	l.Mutex.Lock()
-	defer l.Mutex.Unlock()
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
 
 	f, err := os.OpenFile(l.relativePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
