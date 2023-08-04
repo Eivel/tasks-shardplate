@@ -6,6 +6,7 @@ import (
 	"sync"
 )
 
+// LocalStorage is an abstraction of the filesystem storage that implements io.Writer.
 type LocalStorage struct {
 	mutex        sync.Mutex
 	relativePath string
@@ -15,6 +16,7 @@ func NewLocalStorage(filepath string) *LocalStorage {
 	return &LocalStorage{relativePath: filepath}
 }
 
+// Write writes the data to the file.
 func (l *LocalStorage) Write(p []byte) (int, error) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()

@@ -16,11 +16,19 @@ var (
 	ErrConfigInvalid = errors.New("config contains illegal values")
 )
 
+// WorkerPool is the root-level abstraction of a worker pool. It stores all the necessary information to run the workers.
 type WorkerPool struct {
 	Config
 	internalStats
 }
 
+// Config stores the configuration information for the worker pool.
+// StartingWorkersNumber should be greater than 0.
+// MaxWorkersNumber configures how high the pool will scale with demand.
+// WorkerTTL is the time after which the worker will gracefully shutdown.
+// AutoscalingInterval is the time between each tick of the autoscaling algorithm.
+// WorkerFunc stores the logic that workers will execute.
+// FinalizeWorkerFunc stores the logic that workers will execute once before they finish work.
 type Config struct {
 	StartingWorkersNumber int
 	MaxWorkersNumber      int
@@ -63,6 +71,8 @@ func configValid(config Config) bool {
 	return true
 }
 
+// Start runs the worker pool and creates the work depending on the configuration. Upon cancelling with context it
+// gracefully shuts down.
 func (wp *WorkerPool) Start(ctx context.Context) {
 	workerCtx, workerCtxCancelFunc := context.WithDeadline(ctx, time.Now().Add(wp.Config.WorkerTTL))
 	wg := &sync.WaitGroup{}

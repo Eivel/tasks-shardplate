@@ -16,12 +16,17 @@ type internalData struct {
 	Reserved bool
 }
 
+// ShardedQueue is a simple implementation of a concurrent safe queue with the use of Go's slices.
+// The implementation is highly inefficient and serves only a demonstrational purpose.
+// In the production uses it's recommended to use robust solutions such as RabbitMQ.
 type ShardedQueue struct {
 	mutex        sync.Mutex
 	Shards       []Shard
 	ShardsNumber int
 }
 
+// Shard represents a single subqueue. Such separation allows to use different data sharding algorithms and
+// connect different worker pools to different shards.
 type Shard struct {
 	mutex                    sync.Mutex
 	Data                     []internalData
@@ -43,6 +48,8 @@ func NewShardedQueue(shardsNumber int) *ShardedQueue {
 	return shardedQueue
 }
 
+// Push contains a simple logic of sharding the incoming data (based on the smallest shard) and
+// stores it into the subqueue.
 func (sq *ShardedQueue) Push(queueElement payload.Identifiable) error {
 	sq.Shards[0].mutex.Lock()
 	defer sq.Shards[0].mutex.Unlock()
@@ -69,6 +76,7 @@ func (sq *ShardedQueue) Push(queueElement payload.Identifiable) error {
 	return nil
 }
 
+// Len returns the length of the shard's subqueue.
 func (sq *ShardedQueue) Len(shardNumber int) int {
 	sq.Shards[shardNumber].mutex.Lock()
 	defer sq.Shards[shardNumber].mutex.Unlock()
@@ -76,7 +84,8 @@ func (sq *ShardedQueue) Len(shardNumber int) int {
 	return len(sq.Shards[shardNumber].Data)
 }
 
-// TODO issues: long search for the reservations
+// Pop reserves a resource, leaving it in the queue for final confirmation that
+// the resource has been processed successfully.
 func (sq *ShardedQueue) Pop(shardNumber int) (payload.Identifiable, error) {
 	sq.Shards[shardNumber].mutex.Lock()
 	defer sq.Shards[shardNumber].mutex.Unlock()
@@ -100,6 +109,9 @@ func (sq *ShardedQueue) Pop(shardNumber int) (payload.Identifiable, error) {
 	return nil, ErrQueueEmpty
 }
 
+// Restore undos the reservation made by Pop method, virtually "returning" the resource to be
+// taken by a different worker.
+// TODO: a separate process that restores resources reserved for too long.
 func (sq *ShardedQueue) Restore(shardNumber int, queueElement payload.Identifiable) error {
 	sq.Shards[shardNumber].mutex.Lock()
 	defer sq.Shards[shardNumber].mutex.Unlock()
@@ -117,6 +129,7 @@ func (sq *ShardedQueue) Restore(shardNumber int, queueElement payload.Identifiab
 	return nil
 }
 
+// Free hard removes the resource from the queue.
 func (sq *ShardedQueue) Free(shardNumber int, queueElement payload.Identifiable) error {
 	sq.Shards[shardNumber].mutex.Lock()
 	defer sq.Shards[shardNumber].mutex.Unlock()
@@ -135,6 +148,7 @@ func (sq *ShardedQueue) Free(shardNumber int, queueElement payload.Identifiable)
 	return nil
 }
 
+// Start runs the production and confirmation loops that explose the resources on the proper channels.
 func (sq *ShardedQueue) Start(ctx context.Context) {
 	wg := &sync.WaitGroup{}
 	for index := range sq.Shards {
@@ -146,6 +160,7 @@ func (sq *ShardedQueue) Start(ctx context.Context) {
 	log.Println("exiting queue")
 }
 
+// Confirm takes the signals of properly processed resources and removes them from the queue permanently.
 func (sq *ShardedQueue) Confirm(ctx context.Context, shardNumber int, wg *sync.WaitGroup) {
 	go func(ctx context.Context, sq *ShardedQueue, shardNumber int, wg *sync.WaitGroup) {
 		for {
@@ -158,7 +173,7 @@ func (sq *ShardedQueue) Confirm(ctx context.Context, shardNumber int, wg *sync.W
 				}
 
 			case <-ctx.Done():
-				// Serialize reserved and unhandled elements to disk/db
+				// TODO: Serialize reserved and unhandled elements to disk/db
 				wg.Done()
 				return
 			}
@@ -167,6 +182,8 @@ func (sq *ShardedQueue) Confirm(ctx context.Context, shardNumber int, wg *sync.W
 	}(ctx, sq, shardNumber, wg)
 }
 
+// Produce takes the resources from the queue and exposes them to the workers via channels.
+// It uses a soft removal by Pop method, only marking the resources as reserved.
 func (sq *ShardedQueue) Produce(ctx context.Context, shardNumber int, wg *sync.WaitGroup) {
 	go func(ctx context.Context, sq *ShardedQueue, shardNumber int, wg *sync.WaitGroup) {
 		for {
@@ -194,6 +211,7 @@ func (sq *ShardedQueue) Produce(ctx context.Context, shardNumber int, wg *sync.W
 	}(ctx, sq, shardNumber, wg)
 }
 
+// Consume returns the channels for workers to use.
 // TODO ideally that would register a consumer and create new channels for it, but I'm doing shortcuts
 func (sq *ShardedQueue) Consume(shardNumber int) (chan payload.Identifiable, chan payload.Identifiable) {
 	return sq.Shards[shardNumber].outgoingDataChan, sq.Shards[shardNumber].incomingConfirmationChan
